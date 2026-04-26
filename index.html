@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CMOS Bayer Filter & Demosaicing Simulator</title>
+  <meta name="description"
+    content="Interactive simulator demonstrating how digital cameras reconstruct full-color images from single-channel RGGB Bayer filter sensor data using bilinear interpolation demosaicing.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+
+  <!-- Tailwind v3 Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        }
+      }
+    }
+  </script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="min-h-screen font-sans text-gray-300 antialiased">
+
+  <!-- ═══ Header ═══ -->
+  <header class="pt-10 pb-6 text-center px-4">
+    <div class="header-accent"></div>
+    <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-white tracking-tight mb-3">
+      CMOS Bayer Filter &amp; Demosaicing
+    </h1>
+    <p class="max-w-2xl mx-auto text-sm sm:text-base text-gray-400 leading-relaxed">
+      Your camera's sensor sees only <span class="text-emerald-400 font-medium">monochrome</span>.
+      A color filter array lets each pixel capture one color : <span class="text-red-400">R</span>,
+      <span class="text-green-400">G</span> or <span class="text-blue-400">B</span>.
+      The ISP then reconstructs the full-color image using interpolation.
+    </p>
+  </header>
+
+  <!-- ═══ Upload Area ═══ -->
+  <section class="max-w-xl mx-auto px-4 pb-8">
+    <div id="upload-area" class="upload-zone">
+      <div class="upload-icon">
+        <!-- Camera icon -->
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+          <circle cx="12" cy="13" r="4" />
+        </svg>
+      </div>
+      <h3 class="text-base font-semibold text-gray-300 mb-1">
+        Drop an image here or click to upload
+      </h3>
+      <p class="text-xs text-gray-500">
+        Supports JPG, PNG, WebP &nbsp;·&nbsp; Max resolution: 1200 × 1200
+      </p>
+      <div id="resize-notice" class="resize-notice hidden justify-center mx-auto mt-3" style="width: fit-content;">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 9v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-linecap="round"
+            stroke-linejoin="round" />
+        </svg>
+        <span id="resize-text"></span>
+      </div>
+    </div>
+    <input type="file" id="file-input" accept="image/*" class="hidden">
+  </section>
+
+  <!-- ═══ Processing Pipeline ═══ -->
+  <section id="pipeline-section" class="max-w-7xl mx-auto px-4 pb-6 hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr_auto_1fr] gap-4 lg:gap-3 items-start">
+
+      <!-- ── Canvas 1: Original ── -->
+      <div class="canvas-card" id="card-original">
+        <div class="card-header">
+          <span class="step-badge step-original">1</span>
+          <div>
+            <h2 class="card-title">Original Image</h2>
+            <p class="card-subtitle">Full RGB color data</p>
+          </div>
+        </div>
+        <div class="canvas-wrapper original-glow">
+          <canvas id="canvas-original"></canvas>
+          <div class="canvas-placeholder" id="ph-original">
+            <svg viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+            <span>Awaiting image</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow 1→2 -->
+      <div class="pipeline-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </div>
+
+      <!-- ── Canvas 2: Bayer Mask ── -->
+      <div class="canvas-card" id="card-bayer">
+        <div class="card-header">
+          <span class="step-badge step-sensor">2</span>
+          <div>
+            <h2 class="card-title">Raw Sensor Data</h2>
+            <p class="card-subtitle">After RGGB Bayer CFA mask</p>
+          </div>
+        </div>
+        <div class="canvas-wrapper sensor-glow">
+          <canvas id="canvas-bayer"></canvas>
+          <div class="canvas-placeholder" id="ph-bayer">
+            <svg viewBox="0 0 24 24">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+            </svg>
+            <span>Pending Phase 1</span>
+          </div>
+          <div class="processing-overlay" id="proc-bayer">
+            <div class="spinner"></div>
+            <span>Applying Bayer mask…</span>
+          </div>
+        </div>
+        <!-- Bayer Pattern Legend -->
+        <div class="bayer-legend">
+          <div class="legend-title text-center">RGGB Bayer Pattern (2×2 tile)</div>
+          <div class="bayer-grid">
+            <div class="bayer-cell cell-r">R</div>
+            <div class="bayer-cell cell-g">Gr</div>
+            <div class="bayer-cell cell-g">Gb</div>
+            <div class="bayer-cell cell-b">B</div>
+          </div>
+          <p class="legend-note">Each sensor pixel captures only<br>one color channel through its micro-filter</p>
+        </div>
+      </div>
+
+      <!-- Arrow 2→3 -->
+      <div class="pipeline-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </div>
+
+      <!-- ── Canvas 3: Demosaiced ── -->
+      <div class="canvas-card" id="card-demosaic">
+        <div class="card-header">
+          <span class="step-badge step-software">3</span>
+          <div>
+            <h2 class="card-title">Reconstructed Image</h2>
+            <p class="card-subtitle">After bilinear interpolation</p>
+          </div>
+        </div>
+        <div class="canvas-wrapper software-glow">
+          <canvas id="canvas-demosaic"></canvas>
+          <div class="canvas-placeholder" id="ph-demosaic">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" />
+            </svg>
+            <span>Pending Phase 2</span>
+          </div>
+          <div class="processing-overlay" id="proc-demosaic">
+            <div class="spinner" style="border-top-color: var(--accent-software);"></div>
+            <span>Running demosaic…</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ Stats Panel ═══ -->
+  <section class="max-w-3xl mx-auto px-4 pb-12">
+    <div id="stats-panel" class="stats-glass">
+      <div class="stat-item">
+        <span class="stat-label">Dimensions</span>
+        <span id="stat-dim" class="stat-value accent-original">—</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">Total Pixels</span>
+        <span id="stat-pixels" class="stat-value">—</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">Bayer Mask</span>
+        <span id="stat-p1" class="stat-value accent-sensor">—</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">Demosaic</span>
+        <span id="stat-p2" class="stat-value accent-software">—</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-label">Total Time</span>
+        <span id="stat-total" class="stat-value">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Footer ═══ -->
+  <footer class="text-center pb-8 text-xs text-gray-600">
+    CMOS Bayer Filter Simulator &nbsp;·&nbsp; ISP Pipeline Visualization
+  </footer>
+
+  <!-- Error Toast -->
+  <div id="error-toast" class="error-toast"></div>
+
+  <!-- App Logic -->
+  <script src="script.js"></script>
+</body>
+
+</html>
